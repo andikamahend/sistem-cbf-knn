@@ -67,7 +67,7 @@ knn_model.fit(tfidf_matrix_train)
 print("✅ Model Siap Digunakan!")
 
 # ==========================================
-# 3. ENDPOINT API PENCARIAN
+# 3. ENDPOINT API PENCARIAN & EVALUASI
 # ==========================================
 @app.route('/cari', methods=['GET'])
 def cari_rekomendasi():
@@ -90,21 +90,34 @@ def cari_rekomendasi():
     top_rekomendasi = []
     peringkat = 1
     
+    target_genre_set = set(bersihkan_teks(str(film_terpilih['genre'])).split())
+    relevant_recommended = 0
+    
     for idx, score in zip(indices, sim_scores):
         if df_train.iloc[idx]['title'].lower() == film_terpilih['title'].lower():
             continue 
             
         row = df_train.iloc[idx]
+        
+        rec_genre_set = set(bersihkan_teks(str(row['genre'])).split())
+        is_relevant = bool(target_genre_set.intersection(rec_genre_set))
+        
+        if is_relevant:
+            relevant_recommended += 1
+            
         top_rekomendasi.append({
             "peringkat": peringkat,
             "judul": row['title'],
             "tahun": int(row['year']),
             "genre": row['genre'],
-            "akurasi": f"{score * 100:.2f}%"
+            "kemiripan": f"{score * 100:.2f}%"
         })
         peringkat += 1
         if len(top_rekomendasi) == 5:
             break
+
+    jumlah_rekomendasi = len(top_rekomendasi)
+    precision = relevant_recommended / jumlah_rekomendasi if jumlah_rekomendasi > 0 else 0
 
     return jsonify({
         "status": "success",
@@ -113,61 +126,15 @@ def cari_rekomendasi():
             "tahun": int(film_terpilih['year']),
             "genre": film_terpilih['genre']
         },
-        "rekomendasi": top_rekomendasi
-    })
-
-# ==========================================
-# 4. ENDPOINT API EVALUASI
-# ==========================================
-@app.route('/evaluasi', methods=['GET'])
-def evaluasi_sistem():
-    k = 10
-    sample_size = 200
-    
-    df_test_sample = df_test.head(sample_size)
-    tfidf_matrix_test = tfidf.transform(df_test_sample['combined_features'])
-    
-    distances, indices = knn_model.kneighbors(tfidf_matrix_test, n_neighbors=k)
-    
-    total_precision, total_recall, total_f1 = 0, 0, 0
-    train_genres_clean = [set(bersihkan_teks(str(g)).split()) for g in train_genres]
-    
-    for i in range(sample_size):
-        target_genre_raw = df_test_sample.iloc[i]['genre']
-        target_genre_set = set(bersihkan_teks(str(target_genre_raw)).split())
-        
-        if not target_genre_set:
-            continue
-            
-        total_relevant_in_train = sum(1 for g_set in train_genres_clean if target_genre_set.intersection(g_set))
-        top_k_indices = indices[i]
-        relevant_recommended = 0
-        
-        for idx in top_k_indices:
-            rec_genre_set = train_genres_clean[idx]
-            if target_genre_set.intersection(rec_genre_set):
-                relevant_recommended += 1
-        
-        precision = relevant_recommended / k
-        recall = relevant_recommended / total_relevant_in_train if total_relevant_in_train > 0 else 0
-        f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
-        
-        total_precision += precision
-        total_recall += recall
-        total_f1 += f1
-        
-    avg_precision = total_precision / sample_size
-    avg_recall = total_recall / sample_size
-    avg_f1 = total_f1 / sample_size
-    
-    return jsonify({
-        "status": "success",
-        "sample_size": sample_size,
-        "k_value": k,
-        "precision": f"{avg_precision:.4f}",
-        "recall": f"{avg_recall:.4f}",
-        "f1_score": f"{avg_f1:.4f}"
+        "rekomendasi": top_rekomendasi,
+        "evaluasi_pencarian": {
+            "judul_film": film_terpilih['title'],
+            "jumlah_rekomendasi": jumlah_rekomendasi,
+            "jumlah_rekomendasi_relevan": relevant_recommended,
+            "precision": f"{precision:.4f}"
+        }
     })
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    # Tambahan use_reloader=False untuk mencegah eror SystemExit dari Debugger VS Code
+    app.run(debug=True, use_reloader=False, port=5000)

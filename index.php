@@ -9,7 +9,7 @@
         body { background-color: #f8f9fa; }
         .container { max-width: 900px; margin-top: 50px; }
         .card { box-shadow: 0 4px 8px rgba(0,0,0,0.1); border: none; }
-        .eval-box { background-color: #e9ecef; border-left: 5px solid #0d6efd; }
+        .eval-box { background-color: #f0f4f8; border-left: 5px solid #dc3545; }
     </style>
 </head>
 <body>
@@ -22,45 +22,17 @@
 
     <div class="card p-4 mb-4">
         <form method="GET" action="">
-            <div class="input-group mb-3">
+            <div class="input-group">
                 <input type="text" class="form-control form-control-lg" name="judul" placeholder="Masukkan judul film..." 
-                       value="<?= isset($_GET['judul']) ? htmlspecialchars($_GET['judul']) : '' ?>">
+                       value="<?= isset($_GET['judul']) ? htmlspecialchars($_GET['judul']) : '' ?>" required>
                 <button class="btn btn-primary px-4" type="submit">Cari Rekomendasi</button>
-            </div>
-            <div class="text-center mt-2">
-                <span class="text-muted small">atau</span><br>
-                <button type="submit" name="aksi" value="evaluasi" class="btn btn-outline-dark btn-sm mt-2">
-                    📊 Jalankan Evaluasi Sistem (Precision/Recall/F1)
-                </button>
             </div>
         </form>
     </div>
 
     <?php
-    // --- JIKA TOMBOL EVALUASI DITEKAN ---
-    if (isset($_GET['aksi']) && $_GET['aksi'] == 'evaluasi') {
-        $url_api_eval = "http://localhost:5000/evaluasi";
-        $response_eval = @file_get_contents($url_api_eval);
-        
-        if ($response_eval === FALSE) {
-            echo '<div class="alert alert-danger">❌ Gagal terhubung ke Engine Python. Pastikan <b>app.py</b> berjalan.</div>';
-        } else {
-            $data_eval = json_decode($response_eval, true);
-            echo '<div class="card p-4 eval-box mb-4">';
-            echo '<h5>📈 Hasil Evaluasi Sistem (Optimized KNN)</h5>';
-            echo '<hr>';
-            echo '<ul class="list-unstyled fs-5 mb-0">';
-            echo '<li><strong>Total Data Uji:</strong> ' . $data_eval['sample_size'] . ' (K=' . $data_eval['k_value'] . ')</li>';
-            echo '<li><strong>Rata-rata Precision@10:</strong> <span class="text-success">' . $data_eval['precision'] . '</span></li>';
-            echo '<li><strong>Rata-rata Recall@10:</strong> <span class="text-primary">' . $data_eval['recall'] . '</span></li>';
-            echo '<li><strong>Rata-rata F1-Score@10:</strong> <span class="text-danger">' . $data_eval['f1_score'] . '</span></li>';
-            echo '</ul>';
-            echo '</div>';
-        }
-    }
-
     // --- JIKA TOMBOL PENCARIAN DITEKAN ---
-    elseif (isset($_GET['judul']) && !empty(trim($_GET['judul']))) {
+    if (isset($_GET['judul']) && !empty(trim($_GET['judul']))) {
         $judul = urlencode(trim($_GET['judul']));
         $url_api = "http://localhost:5000/cari?judul=" . $judul;
         $response = @file_get_contents($url_api);
@@ -78,12 +50,13 @@
                 echo '<strong>🎯 Film Referensi Anda:</strong> ' . htmlspecialchars($film_target['judul']) . ' (' . htmlspecialchars($film_target['tahun']) . ') - ' . htmlspecialchars($film_target['genre']);
                 echo '</div>';
                 
-                echo '<div class="card p-4">';
-                echo '<h5 class="mb-3">⭐ Top 5 Rekomendasi Film:</h5>';
+                // --- TABEL 1: TOP 5 REKOMENDASI FILM ---
+                echo '<div class="card p-4 mb-4">';
+                echo '<h5 class="mb-3 fw-bold">⭐ Top 5 Rekomendasi Film:</h5>';
                 echo '<div class="table-responsive">';
                 echo '<table class="table table-hover table-bordered align-middle text-center">';
                 echo '<thead class="table-dark">';
-                echo '<tr><th>Peringkat</th><th>Judul Film</th><th>Tahun</th><th>Genre</th><th>Tingkat Akurasi</th></tr>';
+                echo '<tr><th>Peringkat</th><th>Judul Film</th><th>Tahun</th><th>Genre</th><th>Tingkat Kemiripan</th></tr>';
                 echo '</thead><tbody>';
                 
                 foreach ($data['rekomendasi'] as $rek) {
@@ -92,10 +65,34 @@
                     echo '<td class="text-start fw-bold">' . htmlspecialchars($rek['judul']) . '</td>';
                     echo '<td>' . htmlspecialchars($rek['tahun']) . '</td>';
                     echo '<td>' . htmlspecialchars($rek['genre']) . '</td>';
-                    echo '<td><span class="badge bg-success fs-6">' . htmlspecialchars($rek['akurasi']) . '</span></td>';
+                    echo '<td><span class="badge bg-success fs-6">' . htmlspecialchars($rek['kemiripan']) . '</span></td>';
                     echo '</tr>';
                 }
                 echo '</tbody></table></div></div>';
+
+                // --- TABEL 2: TABEL EVALUASI PRECISION PENCARIAN ---
+                if (isset($data['evaluasi_pencarian'])) {
+                    $eval = $data['evaluasi_pencarian'];
+                    echo '<div class="card p-4 eval-box">';
+                    echo '<h5 class="mb-3 text-danger fw-bold">📊 Tabel Hasil Evaluasi Performa Kinerja (Precision)</h5>';
+                    echo '<div class="table-responsive">';
+                    echo '<table class="table table-bordered align-middle text-center bg-white">';
+                    echo '<thead class="table-primary">';
+                    echo '<tr>';
+                    echo '<th>Judul Film</th>';
+                    echo '<th>Jumlah Rekomendasi</th>';
+                    echo '<th>Jumlah Rekomendasi Relevan</th>';
+                    echo '<th>Precision</th>';
+                    echo '</tr>';
+                    echo '</thead><tbody>';
+                    echo '<tr>';
+                    echo '<td class="text-start fw-bold">' . htmlspecialchars($eval['judul_film']) . '</td>';
+                    echo '<td>' . htmlspecialchars($eval['jumlah_rekomendasi']) . '</td>';
+                    echo '<td>' . htmlspecialchars($eval['jumlah_rekomendasi_relevan']) . '</td>';
+                    echo '<td><span class="badge bg-danger fs-6">' . htmlspecialchars($eval['precision']) . '</span></td>';
+                    echo '</tr>';
+                    echo '</tbody></table></div></div>';
+                }
             }
         }
     }
