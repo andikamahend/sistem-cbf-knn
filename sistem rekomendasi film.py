@@ -14,7 +14,8 @@ print("⏳ Memuat dataset dan melatih model KNN... Mohon tunggu.")
 df = pd.read_csv('filmtv_movies.csv', delimiter=';')
 
 features_text = ['genre', 'directors', 'actors', 'description']
-features_num = ['year', 'humor', 'rhythm', 'effort', 'tension', 'erotism']
+# Menghapus 'humor', 'rhythm', 'effort', 'tension', 'erotism'
+features_num = ['year'] 
 
 for feature in features_text:
     df[feature] = df[feature].fillna('')
@@ -37,14 +38,10 @@ def combine_features(row):
     
     text_base = f"{genre_weighted}{directors_clean} {actors_clean} {description_clean}"
     
-    year_feat = f"year_{row['year']}" if row['year'] > 0 else ""
-    humor_feat = f"humor_{row['humor']}"
-    rhythm_feat = f"rhythm_{row['rhythm']}"
-    effort_feat = f"effort_{row['effort']}"
-    tension_feat = f"tension_{row['tension']}"
-    erotism_feat = f"erotism_{row['erotism']}"
+    tahun = int(row['year'])
+    decade_feat = f"decade_{tahun - (tahun % 10)}s" if tahun > 0 else ""
     
-    return f"{text_base} {year_feat} {humor_feat} {rhythm_feat} {effort_feat} {tension_feat} {erotism_feat}"
+    return f"{text_base} {decade_feat}"
 
 df['combined_features'] = df.apply(combine_features, axis=1)
 df = df.dropna(subset=['title']).reset_index(drop=True)
