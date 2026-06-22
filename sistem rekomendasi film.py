@@ -3,6 +3,8 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.neighbors import NearestNeighbors
+from sklearn.preprocessing import MinMaxScaler
+from scipy.sparse import hstack
 import re
 
 app = Flask(__name__)
@@ -14,14 +16,19 @@ print("⏳ Memuat dataset dan melatih model KNN... Mohon tunggu.")
 df = pd.read_csv('filmtv_movies.csv', delimiter=';')
 
 features_text = ['genre', 'directors', 'actors', 'description']
-# Menghapus 'humor', 'rhythm', 'effort', 'tension', 'erotism'
 features_num = ['year'] 
+# Fitur rating yang akan digunakan
+features_float = ['avg_vote', 'critics_vote', 'public_vote']
 
 for feature in features_text:
     df[feature] = df[feature].fillna('')
 
 for feature in features_num:
     df[feature] = df[feature].fillna(0).astype(int)
+
+# Menangani nilai kosong pada kolom rating dengan menjadikannya 0.0 (float)
+for feature in features_float:
+    df[feature] = pd.to_numeric(df[feature], errors='coerce').fillna(0.0).astype(float)
 
 def bersihkan_teks(teks):
     teks = teks.lower()
@@ -38,6 +45,7 @@ def combine_features(row):
     
     text_base = f"{genre_weighted}{directors_clean} {actors_clean} {description_clean}"
     
+    # Tahun tetap dibiarkan sebagai teks dekade untuk konteks ekstra di TF-IDF
     tahun = int(row['year'])
     decade_feat = f"decade_{tahun - (tahun % 10)}s" if tahun > 0 else ""
     
@@ -47,20 +55,31 @@ df['combined_features'] = df.apply(combine_features, axis=1)
 df = df.dropna(subset=['title']).reset_index(drop=True)
 
 # ==========================================
-# 2. PEMBAGIAN DATA & VEKTORISASI TF-IDF
+# 2. PEMBAGIAN DATA, VEKTORISASI & SCALING
 # ==========================================
 df_train, df_test = train_test_split(df, test_size=0.2, random_state=42)
 df_train = df_train.reset_index(drop=True)
 df_test = df_test.reset_index(drop=True)
 
+# A. Transformasi Teks (TF-IDF)
 stop_words_list = list(TfidfVectorizer(stop_words='english').get_stop_words()) + ['il', 'lo', 'i', 'gli', 'la', 'le', 'un', 'una', 'di', 'del', 'da', 'in', 'con', 'su', 'per', 'tra', 'fra']
 
 tfidf = TfidfVectorizer(stop_words=stop_words_list)
 tfidf_matrix_train = tfidf.fit_transform(df_train['combined_features'])
-train_genres = df_train['genre'].values 
 
+# B. Transformasi Numerik (MinMaxScaler)
+scaler = MinMaxScaler()
+# Kolom numerik yang ingin dievaluasi kedekatannya
+kolom_numerik = ['year', 'avg_vote', 'critics_vote', 'public_vote'] 
+scaled_num_train = scaler.fit_transform(df_train[kolom_numerik])
+
+# C. Menggabungkan Vektor Teks dan Vektor Numerik (hstack)
+# hstack digunakan karena TF-IDF menghasilkan matriks sparse (jarang)
+combined_matrix_train = hstack([tfidf_matrix_train, scaled_num_train])
+
+# D. Melatih Model KNN
 knn_model = NearestNeighbors(metric='cosine', algorithm='brute')
-knn_model.fit(tfidf_matrix_train)
+knn_model.fit(combined_matrix_train)
 print("✅ Model Siap Digunakan!")
 
 # ==========================================
@@ -78,8 +97,18 @@ def cari_rekomendasi():
         return jsonify({"status": "error", "pesan": f"Film '{query_judul}' tidak ditemukan di database."})
     
     film_terpilih = pencarian.iloc[0]
-    vector_target = tfidf.transform([film_terpilih['combined_features']])
     
+    # 1. Transformasi target teks
+    vector_text_target = tfidf.transform([film_terpilih['combined_features']])
+    
+    # 2. Transformasi target numerik (pastikan bentuknya 2D array / DataFrame)
+    data_numerik_target = film_terpilih[kolom_numerik].to_frame().T
+    vector_num_target = scaler.transform(data_numerik_target)
+    
+    # 3. Gabungkan keduanya untuk film yang dicari
+    vector_target = hstack([vector_text_target, vector_num_target])
+    
+    # 4. Cari tetangga terdekat (rekomendasi)
     distances, indices = knn_model.kneighbors(vector_target, n_neighbors=15)
     sim_scores = 1 - distances[0]
     indices = indices[0]
@@ -107,6 +136,9 @@ def cari_rekomendasi():
             "judul": row['title'],
             "tahun": int(row['year']),
             "genre": row['genre'],
+            "avg_vote": float(row['avg_vote']),
+            "critics_vote": float(row['critics_vote']),
+            "public_vote": float(row['public_vote']),
             "kemiripan": f"{score * 100:.2f}%"
         })
         peringkat += 1
@@ -121,7 +153,10 @@ def cari_rekomendasi():
         "film_dicari": {
             "judul": film_terpilih['title'],
             "tahun": int(film_terpilih['year']),
-            "genre": film_terpilih['genre']
+            "genre": film_terpilih['genre'],
+            "avg_vote": float(film_terpilih['avg_vote']),
+            "critics_vote": float(film_terpilih['critics_vote']),
+            "public_vote": float(film_terpilih['public_vote'])
         },
         "rekomendasi": top_rekomendasi,
         "evaluasi_pencarian": {
@@ -133,5 +168,4 @@ def cari_rekomendasi():
     })
 
 if __name__ == '__main__':
-    # Tambahan use_reloader=False untuk mencegah eror SystemExit dari Debugger VS Code
     app.run(debug=True, use_reloader=False, port=5000)
